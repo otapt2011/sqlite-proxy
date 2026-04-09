@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>SQLite Explorer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .result-table { border-collapse: collapse; width: 100%; }
+    .result-table th, .result-table td { border: 1px solid #ddd; padding: 6px; text-align: left; }
+  </style>
+</head>
+<body class="bg-gray-100 p-4">
+<div class="max-w-6xl mx-auto bg-white rounded-xl shadow p-5">
+  <h1 class="text-2xl font-bold mb-2">🗄️ Northwind Database Explorer</h1>
+  <p class="mb-3 text-gray-600">API Key required – stored in your browser.</p>
+
+  <div class="mb-3">
+    <label class="font-bold">API Key:</label>
+    <input type="password" id="apiKey" class="border p-2 rounded w-64" placeholder="Your API_SECRET_KEY">
+    <button id="saveKey" class="bg-blue-600 text-white px-3 py-2 rounded ml-2">Save Key</button>
+    <span id="keyStatus" class="ml-2 text-sm"></span>
+  </div>
+
+  <div class="flex gap-4">
+    <div class="w-1/4 border rounded p-2">
+      <h2 class="font-bold">📋 Tables</h2>
+      <button id="refreshTables" class="bg-green-600 text-white px-3 py-1 rounded text-sm mb-2">Refresh</button>
+      <div id="tablesList" class="space-y-1 max-h-96 overflow-auto"></div>
+    </div>
+    <div class="w-3/4 border rounded p-2">
+      <div class="flex justify-between">
+        <h2 id="viewTitle" class="font-bold">📄 Data</h2>
+        <button id="addRowBtn" class="bg-blue-600 text-white px-3 py-1 rounded text-sm hidden">Add Row</button>
+      </div>
+      <div id="dataContainer" class="overflow-x-auto mt-2"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  let currentTable = null;
+  let currentColumns = [];
+  let apiKey = localStorage.getItem('myKey') || '';
+
+  const keyInput = document.getElementById('apiKey');
+  const keyStatus = document.getElementById('keyStatus');
+  if (apiKey) {
+    keyInput.value = apiKey;
+    keyStatus.innerText = '✅ Key loaded';
+  }
+
+  document.getElementById('saveKey').onclick = () => {
+    apiKey = keyInput.value.trim();
+    if (apiKey) {
+      localStorage.setItem('myKey', apiKey);
+      keyStatus.innerText = '✅ Saved';
+    } else {
+      localStorage.removeItem('myKey');
+      keyStatus.innerText = '❌ Removed';
+    }
+  };
+
+  async function callApi(endpoint, body = null) {
+    if (!apiKey) throw new Error('No API key');
+    const res = await fetch('/api/db' + endpoint, {
+      method: body ? 'POST' : 'GET',
+      headers: { 'X-API-Key': apiKey, 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error);
+    return json;
+  }
+
+  async function loadTables() {
+    const res = await callApi('?sql=SELECT name FROM sqlite_master WHERE type="table" ORDER BY name');
+    const tables = res.rows.map(r => r.name);
+    const container = document.getElementById('tablesList');
+    container.innerHTML = tables.map(t => `<div class="cursor-pointer p-1 hover:bg-gray-100" data-table="${t}">📁 ${t}</div>`).join('');
+    document.querySelectorAll('[data-table]').forEach(el => {
+      el.onclick = () => loadTable(el.dataset.table);
+    });
+  }
+
+  async function loadTable(table) {
+    currentTable = table;
+    document.getElementById('viewTitle').innerText = `📄 Table: ${table}`;
+    document.getElementById('addRowBtn').classList.remove('hidden');
+    const res = await callApi(`?table=${encodeURIComponent(table)}`);
+    const data = res.data || [];
+    let columns = data.length ? Object.keys(data[0]) : [];
+    if (!columns.length) {
+      const colRes = await callApi(`?sql=SELECT * FROM "${table}" LIMIT 0`);
+      columns = colRes.columns || [];
+    }
+    currentColumns = columns;
+    renderData(data, columns, table);
+  }
+
+  function renderData(rows, columns, table) {
+    let html = '<table class="result-table"><thead><tr>';
+    columns.forEach(col => html += `<th>${escapeHtml(col)}</th>`);
+    html += '<th>Actions</th></tr></thead><tbody>';
+    rows.forEach((row, idx) => {
+      html += '<tr>';
+      columns.forEach(col => {
+        let val = row[col];
+        if (val === null) val = 'NULL';
+        html += `<td>${escapeHtml(String(val))}</td>`;
+      });
+      html += `<td><button class="edit bg-yellow-500 text-white px-2 rounded text-xs" data-idx="${idx}">Edit</button>
+               <button class="delete bg-red-600 text-white px-2 rounded text-xs ml-1" data-idx="${idx}">Del</button></td>`;
+      html += '</tr>';
+    });
+    html += '</tbody></table>';
+    document.getElementById('dataContainer').innerHTML = html;
+    // attach edit/delete handlers (similar to before)
+  }
+
+  function escapeHtml(str) {
+    return str.replace(/[&<>]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m]));
+  }
+
+  document.getElementById('refreshTables').onclick = loadTables;
+  if (apiKey) loadTables();
+</script>
+</body>
+</html>
