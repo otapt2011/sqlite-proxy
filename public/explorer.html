@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Northwind Explorer (hosted on Vercel)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-4">
+<div class="max-w-5xl mx-auto bg-white rounded-2xl shadow p-6">
+  <h1 class="text-2xl font-bold text-indigo-600">🗄️ Northwind Database Explorer</h1>
+  <p class="text-gray-600 mb-3">API key stored in your browser</p>
+
+  <div class="mb-4">
+    <label class="font-bold">API Key:</label>
+    <input type="password" id="apiKey" class="border p-2 rounded w-64" placeholder="Your API_SECRET_KEY">
+    <button id="saveKey" class="bg-indigo-600 text-white px-3 py-2 rounded ml-2">Save</button>
+    <span id="keyStatus" class="ml-2 text-sm"></span>
+  </div>
+
+  <div class="flex gap-4">
+    <div class="w-1/3 border rounded p-2">
+      <h2 class="font-bold mb-2">📋 Tables</h2>
+      <button id="refreshTables" class="bg-green-600 text-white px-2 py-1 rounded text-sm mb-2">Refresh</button>
+      <div id="tablesList" class="max-h-96 overflow-auto"></div>
+    </div>
+    <div class="w-2/3 border rounded p-2">
+      <div class="flex justify-between items-center">
+        <h2 id="viewTitle" class="font-bold">📄 Data</h2>
+        <button id="addRowBtn" class="bg-blue-600 text-white px-2 py-1 rounded text-sm hidden">Add Row</button>
+      </div>
+      <div id="dataContainer" class="overflow-x-auto mt-2"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Use relative URL – same origin as the HTML (no CORS)
+  const API_BASE = '/api/db';
+  let currentTable = null;
+  let currentColumns = [];
+  let currentRows = [];
+
+  // Load API key from localStorage
+  let apiKey = localStorage.getItem('myKey') || '';
+  const keyInput = document.getElementById('apiKey');
+  const keyStatus = document.getElementById('keyStatus');
+  keyInput.value = apiKey;
+  keyStatus.innerText = apiKey ? '✅ Key loaded' : '❌ No key';
+
+  document.getElementById('saveKey').onclick = () => {
+    apiKey = keyInput.value.trim();
+    if (apiKey) {
+      localStorage.setItem('myKey', apiKey);
+      keyStatus.innerText = '✅ Saved';
+      loadTables(); // try to load tables
+    } else {
+      localStorage.removeItem('myKey');
+      keyStatus.innerText = '❌ Removed';
+    }
+  };
+
+  async function callApi(endpoint, options = {}) {
+    if (!apiKey) throw new Error('API key missing');
+    const url = API_BASE + endpoint;
+    const res = await fetch(url, {
+      ...options,
+      headers: { 'X-API-Key': apiKey, ...options.headers }
+    });
+    const text = await res.text();
+    let data;
+    try { data = JSON.parse(text); } catch(e) { throw new Error('Invalid response: ' + text.slice(0,100)); }
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
+  }
+
+  async function loadTables() {
+    try {
+      const sql = "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name";
+      const data = await callApi(`?sql=${encodeURIComponent(sql)}`);
+      const tables = data.rows.map(r => r.name);
+      const container = document.getElementById('tablesList');
+      container.innerHTML = tables.map(t => `<div class="cursor-pointer p-1 hover:bg-gray-100 border-b" data-table="${t}">📁 ${t}</div>`).join('');
+      document.querySelectorAll('[data-table]').forEach(el => {
+        el.onclick = () => loadTable(el.dataset.table);
+      });
+    } catch (err) {
+      document.getElementById('tablesList').innerHTML = `<span class="text-red-500">Error: ${err.message}</span>`;
+    }
+  }
+
+  async function loadTable(table) {
+    currentTable = table;
+    document.getElementById('viewTitle').innerHTML = `📄 Table: ${table}`;
+    document.getElementById('addRowBtn').classList.remove('hidden');
+    try {
+      const data = await callApi(`?table=${encodeURIComponent(table)}`);
+      const rows = data.data || [];
+      let columns = rows.length ? Object.keys(rows[0]) : [];
+      if (!columns.length) {
+        const colRes = await callApi(`?sql=SELECT * FROM "${table}" LIMIT 0`);
+        columns = colRes.columns || [];
+      }
+      currentColumns = columns;
+      currentRows = rows;
+      renderTable(rows, columns);
+    } catch (err) {
+      document.getElementById('dataContainer').innerHTML = `<span class="text-red-500">Error: ${err.message}</span>`;
+    }
+  }
+
+  function renderTable(rows, columns) {
+    if (!columns.length) {
+      document.getElementById('dataContainer').innerHTML = '<p>Table is empty</p>';
+      return;
+    }
+    let html = '<table class="w-full border-collapse"><thead><tr class="bg-gray-200">';
+    columns.forEach(col => html += `<th class="border p-2 text-left">${escapeHtml(col)}</th>`);
+    html += '<th class="border p-2">Actions</th></tr></thead><tbody>';
+    rows.forEach((row, idx) => {
+      html += '<tr>';
+      columns.forEach(col => {
+        let val = row[col];
+        if (val === null) val = 'NULL';
+        if (typeof val === 'object') val = JSON.stringify(val);
+        html += `<td class="border p-2">${escapeHtml(String(val))}</td>`;
+      });
+      html += `<td class="border p-2">
+        <button class="edit-btn bg-yellow-500 text-white px-2 py-1 rounded text-xs" data-idx="${idx}">Edit</button>
+        <button class="del-btn bg-red-600 text-white px-2 py-1 rounded text-xs ml-1" data-idx="${idx}">Delete</button>
+      </td></tr>`;
+    });
+    html += '</tbody></table>';
+    document.getElementById('dataContainer').innerHTML = html;
+
+    // Attach edit/delete handlers (simplified - requires 'id' column)
+    document.querySelectorAll('.edit-btn').forEach(btn => {
+      btn.onclick = async () => {
+        const idx = parseInt(btn.dataset.idx);
+        const row = currentRows[idx];
+        const idVal = row.id;
+        if (idVal === undefined) { alert('No id column'); return; }
+        const updates = {};
+        for (let col of currentColumns) {
+          if (col === 'id') continue;
+          let newVal = prompt(`New value for ${col}:`, row[col]);
+          if (newVal !== null) updates[col] = newVal;
+        }
+        if (Object.keys(updates).length === 0) return;
+        try {
+          await callApi(`?table=${currentTable}&id=${idVal}`, {
+            method: 'PUT',
+            body: JSON.stringify({ updates })
+          });
+          alert('Updated');
+          loadTable(currentTable);
+        } catch (err) { alert(err.message); }
+      };
+    });
+    document.querySelectorAll('.del-btn').forEach(btn => {
+      btn.onclick = async () => {
+        const idx = parseInt(btn.dataset.idx);
+        const row = currentRows[idx];
+        const idVal = row.id;
+        if (!confirm(`Delete row ${idVal}?`)) return;
+        try {
+          await callApi(`?table=${currentTable}&id=${idVal}`, { method: 'DELETE' });
+          alert('Deleted');
+          loadTable(currentTable);
+        } catch (err) { alert(err.message); }
+      };
+    });
+  }
+
+  document.getElementById('refreshTables').onclick = loadTables;
+  document.getElementById('addRowBtn').onclick = async () => {
+    if (!currentTable) return;
+    const record = {};
+    for (let col of currentColumns) {
+      if (col === 'id') continue;
+      let val = prompt(`Enter value for ${col}:`, '');
+      if (val === null) return;
+      record[col] = val;
+    }
+    try {
+      await callApi(`?table=${currentTable}`, {
+        method: 'POST',
+        body: JSON.stringify({ record })
+      });
+      alert('Inserted');
+      loadTable(currentTable);
+    } catch (err) { alert(err.message); }
+  };
+
+  function escapeHtml(str) {
+    return str.replace(/[&<>]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m]));
+  }
+
+  // If we have a key, load tables automatically
+  if (apiKey) loadTables();
+</script>
+</body>
+</html>
