@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/db.js": {
+      "includeFiles": "wasm/**"
+    }
+  }
+}
