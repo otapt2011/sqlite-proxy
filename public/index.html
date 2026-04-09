@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>SQLite Explorer · Northwind</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+      background: #f3f4f6;
+      margin: 0;
+      padding: 16px;
+    }
+    .card {
+      background: white;
+      border-radius: 24px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+    }
+    h1 { font-size: 1.8rem; margin: 0 0 8px 0; color: #4f46e5; }
+    .sub { color: #6b7280; margin-bottom: 20px; font-size: 0.9rem; }
+    label { font-weight: 600; display: block; margin-bottom: 6px; font-size: 0.85rem; }
+    input, textarea, button {
+      width: 100%;
+      padding: 12px;
+      border-radius: 16px;
+      border: 1px solid #e5e7eb;
+      font-size: 1rem;
+      margin-bottom: 12px;
+    }
+    button {
+      background: #4f46e5;
+      color: white;
+      font-weight: 600;
+      border: none;
+      cursor: pointer;
+      transition: 0.2s;
+    }
+    button:active { transform: scale(0.97); }
+    button.secondary { background: #10b981; }
+    button.danger { background: #ef4444; }
+    .flex-row {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .flex-row button { flex: 1; }
+    pre {
+      background: #1e1e2e;
+      color: #f0f0f0;
+      padding: 12px;
+      border-radius: 16px;
+      overflow-x: auto;
+      font-size: 0.75rem;
+      margin: 12px 0;
+    }
+    .log-panel {
+      background: #0f0f1a;
+      border-radius: 20px;
+      padding: 12px;
+      max-height: 300px;
+      overflow-y: auto;
+      font-family: monospace;
+      font-size: 0.7rem;
+    }
+    .log-line { border-bottom: 1px solid #2a2a3a; padding: 6px 4px; color: #ccc; word-break: break-all; }
+    .log-error { color: #f87171; }
+    .log-success { color: #6ee7b7; }
+    .table-container { overflow-x: auto; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+    }
+    th, td {
+      border: 1px solid #e5e7eb;
+      padding: 8px;
+      text-align: left;
+    }
+    th { background: #f9fafb; }
+    .action-btn {
+      background: none;
+      border: none;
+      padding: 4px 8px;
+      margin: 0 2px;
+      font-size: 0.7rem;
+      border-radius: 20px;
+      width: auto;
+      display: inline-block;
+    }
+    .badge {
+      background: #e5e7eb;
+      padding: 4px 12px;
+      border-radius: 30px;
+      font-size: 0.7rem;
+    }
+    @media (max-width: 640px) {
+      body { padding: 8px; }
+      .card { padding: 16px; }
+      th, td { padding: 4px; font-size: 0.7rem; }
+    }
+  </style>
+</head>
+<body>
+<div class="card">
+  <h1>🗄️ Northwind Explorer</h1>
+  <div class="sub">mobile‑first · live debug log</div>
+
+  <label>🔐 API Key (stored in browser)</label>
+  <input type="password" id="apiKeyInput" placeholder="your API_SECRET_KEY">
+  <div class="flex-row">
+    <button id="saveKeyBtn">💾 Save Key</button>
+    <button id="clearKeyBtn" class="danger">🗑 Clear Key</button>
+  </div>
+
+  <label>🌐 Vercel URL (same as this page)</label>
+  <input type="text" id="baseUrlInput" placeholder="https://your-project.vercel.app" value="">
+
+  <div class="flex-row">
+    <button id="testConnBtn" class="secondary">🔌 Test Connection (SELECT 1)</button>
+    <button id="refreshTablesBtn">📋 Refresh Tables</button>
+  </div>
+
+  <div style="margin-top: 12px;">
+    <label>📝 Custom SQL</label>
+    <textarea id="sqlQuery" rows="2" placeholder="SELECT * FROM Customers LIMIT 5"></textarea>
+    <button id="runSqlBtn">▶ Run SQL</button>
+  </div>
+</div>
+
+<div class="card">
+  <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+    <h2 style="margin:0">📡 Debug Log</h2>
+    <button id="copyLogBtn" style="width: auto; padding: 6px 12px;">📋 Copy Log</button>
+  </div>
+  <div id="logContainer" class="log-panel">
+    <div class="log-line">👉 Ready. Enter your API key and URL, then click Test Connection.</div>
+  </div>
+</div>
+
+<div class="card">
+  <div style="display: flex; justify-content: space-between;">
+    <h2 id="tableTitle">📁 Tables</h2>
+    <span id="tableCount" class="badge">0</span>
+  </div>
+  <div id="tablesList" style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px;"></div>
+
+  <hr style="margin: 16px 0;">
+  <div style="display: flex; justify-content: space-between; align-items: center;">
+    <h3 id="dataTitle">📄 Data</h3>
+    <button id="addRowBtn" style="width: auto; padding: 6px 12px; background: #3b82f6;">+ Add Row</button>
+  </div>
+  <div id="dataContainer" class="table-container">
+    <p class="sub">Select a table to view data</p>
+  </div>
+</div>
+
+<script>
+  // ----- DOM elements -----
+  const apiKeyInput = document.getElementById('apiKeyInput');
+  const baseUrlInput = document.getElementById('baseUrlInput');
+  const saveKeyBtn = document.getElementById('saveKeyBtn');
+  const clearKeyBtn = document.getElementById('clearKeyBtn');
+  const testConnBtn = document.getElementById('testConnBtn');
+  const refreshTablesBtn = document.getElementById('refreshTablesBtn');
+  const runSqlBtn = document.getElementById('runSqlBtn');
+  const sqlQuery = document.getElementById('sqlQuery');
+  const logContainer = document.getElementById('logContainer');
+  const copyLogBtn = document.getElementById('copyLogBtn');
+  const tablesListDiv = document.getElementById('tablesList');
+  const dataContainer = document.getElementById('dataContainer');
+  const dataTitle = document.getElementById('dataTitle');
+  const tableTitle = document.getElementById('tableTitle');
+  const tableCountSpan = document.getElementById('tableCount');
+  const addRowBtn = document.getElementById('addRowBtn');
+
+  // ----- State -----
+  let currentTable = null;
+  let currentColumns = [];
+  let currentRows = [];
+
+  // Load stored values
+  let apiKey = localStorage.getItem('myKey') || '';
+  let baseUrl = localStorage.getItem('baseUrl') || '';
+  apiKeyInput.value = apiKey;
+  baseUrlInput.value = baseUrl;
+  if (!baseUrl) baseUrl = window.location.origin; // fallback to same origin
+
+  // ----- Logging -----
+  function addLog(message, type = 'info') {
+    const logDiv = document.createElement('div');
+    logDiv.className = `log-line log-${type}`;
+    const time = new Date().toLocaleTimeString();
+    logDiv.innerText = `[${time}] ${message}`;
+    logContainer.appendChild(logDiv);
+    logDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  function clearLogs() {
+    logContainer.innerHTML = '';
+    addLog('Log cleared', 'info');
+  }
+
+  copyLogBtn.onclick = () => {
+    const logs = Array.from(logContainer.children).map(el => el.innerText).join('\n');
+    navigator.clipboard.writeText(logs);
+    addLog('📋 Log copied to clipboard', 'success');
+  };
+
+  // ----- Save settings -----
+  saveKeyBtn.onclick = () => {
+    apiKey = apiKeyInput.value.trim();
+    if (apiKey) {
+      localStorage.setItem('myKey', apiKey);
+      addLog('API key saved', 'success');
+    } else {
+      localStorage.removeItem('myKey');
+      addLog('API key removed', 'info');
+    }
+  };
+  clearKeyBtn.onclick = () => {
+    apiKeyInput.value = '';
+    apiKey = '';
+    localStorage.removeItem('myKey');
+    addLog('API key cleared', 'info');
+  };
+  baseUrlInput.addEventListener('change', () => {
+    baseUrl = baseUrlInput.value.trim().replace(/\/$/, '');
+    localStorage.setItem('baseUrl', baseUrl);
+    addLog(`Base URL set to ${baseUrl}`, 'success');
+  });
+
+  // ----- API caller with logging -----
+  async function callApi(endpoint, options = {}) {
+    const url = `${baseUrl}/api/db${endpoint}`;
+    addLog(`➡️ ${options.method || 'GET'} ${url}`, 'info');
+    const headers = { 'X-API-Key': apiKey, ...options.headers };
+    const fetchOptions = { method: options.method || 'GET', headers };
+    if (options.body) fetchOptions.body = JSON.stringify(options.body);
+    try {
+      const response = await fetch(url, fetchOptions);
+      const text = await response.text();
+      let json;
+      try { json = JSON.parse(text); } catch(e) { throw new Error(`Invalid JSON: ${text.slice(0,200)}`); }
+      if (!response.ok) throw new Error(json.error || `HTTP ${response.status}`);
+      addLog(`✅ ${response.status} ${JSON.stringify(json).slice(0,100)}`, 'success');
+      return json;
+    } catch (err) {
+      addLog(`❌ ${err.message}`, 'error');
+      throw err;
+    }
+  }
+
+  // ----- Test connection (SELECT 1) -----
+  testConnBtn.onclick = async () => {
+    if (!apiKey) { addLog('❌ No API key. Save it first.', 'error'); return; }
+    if (!baseUrl) { addLog('❌ No base URL. Enter your Vercel URL.', 'error'); return; }
+    try {
+      const data = await callApi('?sql=SELECT%201');
+      if (data.success && data.rows && data.rows[0]['1'] === 1) {
+        addLog('🎉 Connection successful! Your backend is working.', 'success');
+      } else {
+        addLog('⚠️ Unexpected response: ' + JSON.stringify(data), 'error');
+      }
+    } catch(e) { /* already logged */ }
+  };
+
+  // ----- Fetch table list -----
+  async function fetchTables() {
+    const sql = "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name";
+    const data = await callApi(`?sql=${encodeURIComponent(sql)}`);
+    return data.rows.map(r => r.name);
+  }
+
+  async function renderTables() {
+    try {
+      const tables = await fetchTables();
+      tableCountSpan.innerText = tables.length;
+      tablesListDiv.innerHTML = tables.map(t => `
+        <button class="table-btn" data-table="${t}" style="background:#eef2ff; color:#1f2937; width:auto; padding:6px 14px;">📁 ${t}</button>
+      `).join('');
+      document.querySelectorAll('.table-btn').forEach(btn => {
+        btn.onclick = () => loadTable(btn.dataset.table);
+      });
+      addLog(`Loaded ${tables.length} tables`, 'success');
+    } catch(e) { addLog(`Failed to load tables: ${e.message}`, 'error'); }
+  }
+
+  // ----- Load table data (CRUD) -----
+  async function loadTable(table) {
+    currentTable = table;
+    dataTitle.innerText = `📄 Table: ${table}`;
+    addRowBtn.style.display = 'inline-block';
+    try {
+      const res = await callApi(`?table=${encodeURIComponent(table)}`);
+      const rows = res.data || [];
+      let columns = rows.length ? Object.keys(rows[0]) : [];
+      if (!columns.length) {
+        const colRes = await callApi(`?sql=SELECT * FROM "${table}" LIMIT 0`);
+        columns = colRes.columns || [];
+      }
+      currentColumns = columns;
+      currentRows = rows;
+      renderDataTable(rows, columns);
+    } catch(e) { dataContainer.innerHTML = `<p class="sub">Error: ${e.message}</p>`; }
+  }
+
+  function renderDataTable(rows, columns) {
+    if (!columns.length) {
+      dataContainer.innerHTML = '<p class="sub">Empty table (no columns)</p>';
+      return;
+    }
+    let html = '<div style="overflow-x:auto"><table><thead><tr>';
+    columns.forEach(col => html += `<th>${escapeHtml(col)}</th>`);
+    html += '<th>Actions</th></tr></thead><tbody>';
+    rows.forEach((row, idx) => {
+      html += '<tr>';
+      columns.forEach(col => {
+        let val = row[col];
+        if (val === null) val = 'NULL';
+        if (typeof val === 'object') val = JSON.stringify(val);
+        html += `<td>${escapeHtml(String(val))}</td>`;
+      });
+      html += `<td>
+        <button class="edit-row action-btn" data-idx="${idx}" style="background:#f59e0b;">✏️</button>
+        <button class="delete-row action-btn" data-idx="${idx}" style="background:#ef4444;">🗑️</button>
+      </td></tr>`;
+    });
+    html += '</tbody></table></div>';
+    dataContainer.innerHTML = html;
+
+    // attach edit/delete
+    document.querySelectorAll('.edit-row').forEach(btn => {
+      btn.onclick = async () => {
+        const idx = parseInt(btn.dataset.idx);
+        const row = currentRows[idx];
+        const idVal = row.id;
+        if (idVal === undefined) { alert('No id column'); return; }
+        const updates = {};
+        for (let col of currentColumns) {
+          if (col === 'id') continue;
+          let newVal = prompt(`New value for ${col}:`, row[col]);
+          if (newVal !== null) updates[col] = newVal;
+        }
+        if (Object.keys(updates).length === 0) return;
+        try {
+          await callApi(`?table=${currentTable}&id=${idVal}`, { method: 'PUT', body: { updates } });
+          alert('Updated');
+          loadTable(currentTable);
+        } catch(e) { alert(e.message); }
+      };
+    });
+    document.querySelectorAll('.delete-row').forEach(btn => {
+      btn.onclick = async () => {
+        const idx = parseInt(btn.dataset.idx);
+        const row = currentRows[idx];
+        const idVal = row.id;
+        if (!confirm(`Delete row ${idVal}?`)) return;
+        try {
+          await callApi(`?table=${currentTable}&id=${idVal}`, { method: 'DELETE' });
+          alert('Deleted');
+          loadTable(currentTable);
+        } catch(e) { alert(e.message); }
+      };
+    });
+  }
+
+  // Add row
+  addRowBtn.onclick = async () => {
+    if (!currentTable) return;
+    const record = {};
+    for (let col of currentColumns) {
+      if (col === 'id') continue;
+      let val = prompt(`Enter value for ${col}:`, '');
+      if (val === null) return;
+      record[col] = val;
+    }
+    try {
+      await callApi(`?table=${currentTable}`, { method: 'POST', body: { record } });
+      alert('Inserted');
+      loadTable(currentTable);
+    } catch(e) { alert(e.message); }
+  };
+
+  // Run custom SQL
+  runSqlBtn.onclick = async () => {
+    const sql = sqlQuery.value.trim();
+    if (!sql) return;
+    try {
+      const data = await callApi(`?sql=${encodeURIComponent(sql)}`);
+      if (data.columns && data.rows) {
+        dataTitle.innerText = `📄 SQL Result`;
+        addRowBtn.style.display = 'none';
+        renderDataTable(data.rows, data.columns);
+      } else {
+        dataContainer.innerHTML = `<div class="sub">✅ SQL executed: ${data.message || 'Done'}</div>`;
+        renderTables(); // refresh in case schema changed
+      }
+    } catch(e) {}
+  };
+
+  refreshTablesBtn.onclick = async () => {
+    await renderTables();
+    if (currentTable) loadTable(currentTable);
+  };
+
+  function escapeHtml(str) {
+    return str.replace(/[&<>]/g, m => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' }[m]));
+  }
+
+  // Initial load if key and baseUrl exist
+  if (apiKey && baseUrl) {
+    renderTables();
+  } else {
+    addLog('⚠️ Please save your API key and Vercel URL.', 'info');
+  }
+</script>
+</body>
+</html>
